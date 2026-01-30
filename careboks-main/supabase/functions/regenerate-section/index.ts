@@ -89,6 +89,50 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const WATSONX_URL = "https://eu-de.ml.cloud.ibm.com/ml/v1/text/chat?version=2023-05-29";
+
+// Cache for IAM token
+let cachedToken: string | null = null;
+let tokenExpiry: number = 0;
+
+/**
+ * Get IAM access token from IBM Cloud API Key
+ */
+async function getIAMToken(apiKey: string): Promise<string> {
+  // Check if we have a valid cached token
+  const now = Date.now();
+  if (cachedToken && tokenExpiry > now) {
+    console.log("Using cached IAM token");
+    return cachedToken;
+  }
+
+  console.log("Requesting new IAM token...");
+  
+  const response = await fetch("https://iam.cloud.ibm.com/identity/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json",
+    },
+    body: `grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey=${apiKey}`,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("IAM token request failed:", response.status, errorText);
+    throw new Error(`Failed to get IAM token: ${response.status}`);
+  }
+
+  const data = await response.json();
+  cachedToken = data.access_token;
+  
+  // Set expiry to 5 minutes before actual expiry (tokens typically last 1 hour)
+  tokenExpiry = now + (data.expires_in - 300) * 1000;
+  
+  console.log("Successfully obtained IAM token");
+  return cachedToken;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -106,9 +150,29 @@ serve(async (req) => {
 
     console.log('Regenerating section:', sectionTitle, 'at index:', sectionIndex);
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    const MY_GRANITE_KEY = Deno.env.get("MY_GRANITE_KEY");
+    const WATSONX_PROJECT_ID = Deno.env.get("WATSONX_PROJECT_ID") || "362737bc-a8b8-4834-bc75-523652f8cac8";
+
+    if (!MY_GRANITE_KEY) {
+      throw new Error("MY_GRANITE_KEY is not configured");
+    }
+
+    // Get IAM token
+    let iamToken: string;
+    try {
+      iamToken = await getIAMToken(MY_GRANITE_KEY);
+    } catch (error) {
+      console.error("Failed to obtain IAM token:", error);
+      return new Response(
+        JSON.stringify({
+          error: "Failed to authenticate with IBM Cloud. Please check your MY_GRANITE_KEY.",
+          details: error instanceof Error ? error.message : "Unknown error"
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     // Build patient profile
@@ -149,7 +213,8 @@ EXTRACTED MEDICAL INFORMATION:
     };
 
     // Build focused prompt for this specific section
-    const userPrompt = `
+    const userPrompt = `${SYSTEM_PROMPT}
+
 TECHNICAL NOTE:
 ${technicalNote}
 
@@ -180,44 +245,73 @@ CRITICAL INSTRUCTIONS:
 
 Generate content for "${sectionTitle}".`;
 
-    // Call Lovable AI
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    // Call WatsonX AI
+    const response = await fetch(WATSONX_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Authorization': `Bearer ${iamToken}`,
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userPrompt }
         ],
+        project_id: WATSONX_PROJECT_ID,
+        model_id: 'ibm/granite-4-h-small',
+        temperature: 0.4,
         max_tokens: 1000,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
       }),
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('WatsonX API error:', response.status, errorText);
+
       if (response.status === 429) {
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      if (response.status === 402) {
+
+      if (response.status === 401 || response.status === 403) {
+        // Clear token cache
+        cachedToken = null;
+        tokenExpiry = 0;
+
         return new Response(
-          JSON.stringify({ error: "Payment required. Please add credits to your Lovable AI workspace." }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ 
+            error: "Authentication failed. Please check your MY_GRANITE_KEY.",
+            details: errorText 
+          }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (response.status === 400) {
+        return new Response(
+          JSON.stringify({ 
+            error: "Bad request to WatsonX API. Check project_id and model_id.",
+            details: errorText 
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       
-      const errorText = await response.text();
-      console.error('Lovable AI error:', response.status, errorText);
-      throw new Error(`AI gateway error: ${response.status}`);
+      throw new Error(`WatsonX API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const regeneratedContent = data.choices[0].message.content.trim();
+    const regeneratedContent = data?.choices?.[0]?.message?.content?.trim();
+
+    if (!regeneratedContent) {
+      console.error("No content in response:", data);
+      throw new Error("No content received from AI");
+    }
 
     console.log('Section regenerated successfully');
 

@@ -133,7 +133,7 @@ draft → processing → pending_approval → approved → completed
 - **Styling:** Tailwind CSS, shadcn/ui
 - **Rich Text:** TipTap editor
 - **Backend:** Lovable Cloud (Supabase)
-- **AI:** Google Gemini via Lovable AI
+- **AI:** IBM granite-4-h-small & meta-llama/llama-3-2-11b-vision-instruct via IBM Wotson prompt lab.
 - **PDF Processing:** pdf.js, OCR via edge functions
 
 ## 🚀 Getting Started

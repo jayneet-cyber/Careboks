@@ -6,7 +6,7 @@ CareBoks is an AI-powered medical communication tool that transforms complex car
 ## Tech Stack
 - **Frontend**: React 18 + TypeScript + Vite + TailwindCSS + shadcn/ui
 - **Backend**: Supabase (PostgreSQL + Edge Functions via Deno)
-- **AI**: Lovable/Claude API with tool calling for structured JSON output
+- **AI**: - Model: `ibm/granite-4-h-small` (document generation) & Model: `meta-llama/llama-3-2-11b-vision-instruct` (text extraction)
 - **Build**: Bun (lockfile), not npm
 - **Styling**: TailwindCSS via Radix UI components (no custom CSS)
 
@@ -62,7 +62,7 @@ All Supabase queries via `useCasePersistence` are scoped to authenticated user. 
 
 ### Edge Function Pattern
 Lovable-hosted functions (in `supabase/functions/`) use Deno + tool calling:
-- **Environment variables**: `LOVABLE_API_KEY` injected by Lovable platform
+- **Environment variables**: - `MY_GRANITE_KEY`: IBM - IAM API key for WatsonX access & `WATSONX_PROJECT_ID`: IBM Cloud project ID for WatsonX
 - **Structured output**: Use Claude tool_use for JSON (no string parsing)
 - **Error handling**: Throw with descriptive messages; Deno auto-converts to JSON responses
 - **CORS**: Always include corsHeaders for browser calls

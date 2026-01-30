@@ -188,8 +188,10 @@ Technical Note + Patient Profile
 All functions use default JWT verification settings.
 
 ### Environment Variables
-- `LOVABLE_API_KEY`: Auto-provisioned for AI gateway access
-- Model: `google/gemini-2.5-flash` (default)
+- `MY_GRANITE_KEY`: IBM - IAM API key for WatsonX access
+- `WATSONX_PROJECT_ID`: IBM Cloud project ID for WatsonX
+- Model: `ibm/granite-4-h-small` (document generation)
+- Model: `meta-llama/llama-3-2-11b-vision-instruct` (visual text extraction)
 
 ---
 
